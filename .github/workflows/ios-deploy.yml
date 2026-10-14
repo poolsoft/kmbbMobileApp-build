@@ -1,0 +1,123 @@
+name: iOS TestFlight ve App Store Dagitimi
+
+on:
+  workflow_dispatch:
+    inputs:
+      hedef:
+        description: 'Dagitim Hedefi'
+        required: true
+        default: 'testflight'
+        type: choice
+        options:
+          - testflight
+          - artifact_only
+
+jobs:
+  build-and-deploy:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      FASTLANE_NON_INTERACTIVE: '1'
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: Gerekli secret degerlerini dogrula
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          GIT_BASIC_AUTHORIZATION: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        shell: bash
+        run: |
+          missing=0
+          for name in APPLE_ID APPLE_PASSWORD APP_STORE_CONNECT_API_KEY_ISSUER_ID APP_STORE_CONNECT_API_KEY_KEY APP_STORE_CONNECT_API_KEY_KEY_ID GIT_BASIC_AUTHORIZATION MATCH_PASSWORD TEAM_ID; do
+            value="${!name}"
+            if [[ -z "$value" || "$value" == "-" ]]; then
+              echo "::error::${name} secret degerini Settings > Secrets and variables > Actions altindan girin."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Ozel Depodan (kmbbMobileApp) Kodu Klonla
+        env:
+          AUTH_VAL: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+        run: |
+          if [[ "$AUTH_VAL" == ghp_* || "$AUTH_VAL" == github_pat_* ]]; then
+            git clone --branch flutter --single-branch https://${AUTH_VAL}@github.com/poolsoft/kmbbMobileApp.git .
+          else
+            git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $AUTH_VAL"
+            git clone --branch flutter --single-branch https://github.com/poolsoft/kmbbMobileApp.git .
+          fi
+
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Ruby ve Fastlane Kurulumu
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: ios
+
+      - name: CocoaPods Kurulumu ve Dogrulama
+        run: |
+          gem install cocoapods
+          pod --version
+
+      - name: Flutter Bagimliliklarini Yukle
+        run: |
+          flutter pub get
+          cd ios && pod install
+
+      - name: Fastlane ile Sertifikalari Esitle ve IPA Uret
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+          FASTLANE_USER: ${{ secrets.APPLE_ID }}
+          FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          GIT_BASIC_AUTHORIZATION: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
+          GIT_URL: ${{ secrets.GIT_URL }}
+        run: |
+          if [ -z "$GIT_URL" ]; then
+            if [[ "$GIT_BASIC_AUTHORIZATION" == ghp_* || "$GIT_BASIC_AUTHORIZATION" == github_pat_* ]]; then
+              export GIT_URL="https://${GIT_BASIC_AUTHORIZATION}@github.com/poolsoft/kmbbMobileApp.git"
+            else
+              export GIT_URL="https://github.com/poolsoft/kmbbMobileApp.git"
+            fi
+          fi
+          export MATCH_READONLY="false"
+          cd ios
+          bundle exec fastlane build_release_ipa
+
+      - name: Fastlane ile TestFlight'a Yukle
+        if: ${{ github.event.inputs.hedef == 'testflight' }}
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+        run: |
+          cd ios
+          bundle exec fastlane upload_testflight
+
+      - name: IPA Ciktisini GitHub'a Kaydet (Artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-release
+          path: build/ios/ipa/*.ipa
