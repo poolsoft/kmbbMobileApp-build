@@ -48,11 +48,11 @@ jobs:
           AUTH_VAL: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
         run: |
           if [[ "$AUTH_VAL" == ghp_* || "$AUTH_VAL" == github_pat_* ]]; then
-            git clone --branch flutter --single-branch https://${AUTH_VAL}@github.com/poolsoft/kmbbMobileApp.git .
-          else
-            git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $AUTH_VAL"
-            git clone --branch flutter --single-branch https://github.com/poolsoft/kmbbMobileApp.git .
+            AUTH_VAL="$(printf 'x-access-token:%s' "$AUTH_VAL" | base64 | tr -d '\r\n')"
           fi
+          echo "::add-mask::$AUTH_VAL"
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $AUTH_VAL"
+          git clone --branch flutter --single-branch https://github.com/poolsoft/kmbbMobileApp.git .
 
       - name: Flutter Kurulumu
         uses: subosito/flutter-action@v2
@@ -85,7 +85,6 @@ jobs:
           FASTLANE_USER: ${{ secrets.APPLE_ID }}
           FASTLANE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
@@ -94,13 +93,7 @@ jobs:
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
           GIT_URL: ${{ secrets.GIT_URL }}
         run: |
-          if [ -z "$GIT_URL" ]; then
-            if [[ "$GIT_BASIC_AUTHORIZATION" == ghp_* || "$GIT_BASIC_AUTHORIZATION" == github_pat_* ]]; then
-              export GIT_URL="https://${GIT_BASIC_AUTHORIZATION}@github.com/poolsoft/kmbbMobileApp.git"
-            else
-              export GIT_URL="https://github.com/poolsoft/kmbbMobileApp.git"
-            fi
-          fi
+          export GIT_URL="${GIT_URL:-https://github.com/poolsoft/kmbbMobileApp.git}"
           export MATCH_READONLY="false"
           cd ios
           bundle exec fastlane build_release_ipa
