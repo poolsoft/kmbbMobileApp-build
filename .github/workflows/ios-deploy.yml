@@ -10,7 +10,7 @@ on:
         type: choice
         options:
           - testflight
-          - artifact_only
+          - private_release
 
 concurrency:
   group: ios-release
@@ -112,9 +112,19 @@ jobs:
           cd ios
           bundle exec fastlane upload_testflight
 
-      - name: IPA Ciktisini GitHub'a Kaydet (Artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-app-release
-          path: build/ios/ipa/*.ipa
+      - name: IPA Ciktisini Ozel Depoya (kmbbMobileApp) Release Olarak Yukle
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          TAG_NAME="v4.0.${COMMIT_COUNT}"
+          IPA_FILE=$(ls build/ios/ipa/*.ipa 2>/dev/null | head -n 1)
+          if [ -n "$IPA_FILE" ] && [ -f "$IPA_FILE" ]; then
+            echo "Private depoya release yukleniyor: $TAG_NAME"
+            gh release create "$TAG_NAME" "$IPA_FILE" \
+              --repo poolsoft/kmbbMobileApp \
+              --title "Surum $TAG_NAME" \
+              --notes "Otomatik iOS derlemesi (IPA)." || \
+            gh release upload "$TAG_NAME" "$IPA_FILE" --repo poolsoft/kmbbMobileApp --clobber
+          fi

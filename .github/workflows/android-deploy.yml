@@ -1,0 +1,101 @@
+name: Android Release ve Google Play Dagitimi
+
+on:
+  workflow_dispatch:
+    inputs:
+      hedef:
+        description: 'Dagitim Hedefi'
+        required: true
+        default: 'private_release'
+        type: choice
+        options:
+          - private_release
+          - play_store_internal
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: Ozel Depodan (kmbbMobileApp) Kodu Klonla
+        env:
+          AUTH_VAL: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+        run: |
+          if [[ "$AUTH_VAL" == ghp_* || "$AUTH_VAL" == github_pat_* ]]; then
+            git clone --branch flutter --single-branch https://${AUTH_VAL}@github.com/poolsoft/kmbbMobileApp.git .
+          else
+            git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $AUTH_VAL"
+            git clone --branch flutter --single-branch https://github.com/poolsoft/kmbbMobileApp.git .
+          fi
+
+      - name: Java 17 Kurulumu
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Flutter Bagimliliklarini Yukle
+        run: flutter pub get
+
+      - name: Android Imza Dosyalarini Hazirla (Keystore)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PROPERTIES: ${{ secrets.ANDROID_KEYSTORE_PROPERTIES }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p ../imza
+            echo "$KEYSTORE_BASE64" | base64 -d > ../imza/kmarasbsbelediyesi.jks
+          fi
+          if [ -n "$KEYSTORE_PROPERTIES" ]; then
+            echo "$KEYSTORE_PROPERTIES" > keystore.properties
+          fi
+
+      - name: Android App Bundle (AAB) Derle
+        run: flutter build appbundle --release
+
+      - name: Android APK Derle (Opsiyonel / Hizli Test Icin)
+        run: flutter build apk --release
+
+      - name: Paketleri Ozel Depoya (kmbbMobileApp) Release Olarak Yukle
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GIT_BASIC_AUTHORIZATION }}
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          TAG_NAME="v4.0.${COMMIT_COUNT}"
+          AAB_FILE=$(ls build/app/outputs/bundle/release/*.aab 2>/dev/null | head -n 1)
+          APK_FILE=$(ls build/app/outputs/flutter-apk/*.apk 2>/dev/null | head -n 1)
+
+          FILES_TO_UPLOAD=()
+          [ -n "$AAB_FILE" ] && [ -f "$AAB_FILE" ] && FILES_TO_UPLOAD+=("$AAB_FILE")
+          [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ] && FILES_TO_UPLOAD+=("$APK_FILE")
+
+          if [ ${#FILES_TO_UPLOAD[@]} -gt 0 ]; then
+            echo "Private depoya release yukleniyor: $TAG_NAME"
+            gh release create "$TAG_NAME" "${FILES_TO_UPLOAD[@]}" \
+              --repo poolsoft/kmbbMobileApp \
+              --title "Surum $TAG_NAME" \
+              --notes "Otomatik Android derlemesi (AAB ve APK)." || \
+            gh release upload "$TAG_NAME" "${FILES_TO_UPLOAD[@]}" --repo poolsoft/kmbbMobileApp --clobber
+          fi
+
+      - name: Google Play Console Dahili Teste Yukle
+        if: ${{ github.event.inputs.hedef == 'play_store_internal' && env.HAVE_PLAY_KEY == 'true' }}
+        env:
+          HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON_KEY }}
+          packageName: com.poolsoft.kmarasbsbelediyesi
+          releaseFiles: build/app/outputs/bundle/release/*.aab
+          track: internal
+          status: completed
