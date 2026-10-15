@@ -12,6 +12,10 @@ on:
           - testflight
           - artifact_only
 
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: macos-latest
