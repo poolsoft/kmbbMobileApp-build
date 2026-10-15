@@ -51,6 +51,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PROPERTIES: ${{ secrets.ANDROID_KEYSTORE_PROPERTIES }}
         run: |
+          sed -i '/org.gradle.java.home/d' android/gradle.properties 2>/dev/null || true
           if [ -n "$KEYSTORE_BASE64" ]; then
             mkdir -p ../imza
             echo "$KEYSTORE_BASE64" | base64 -d > ../imza/kmarasbsbelediyesi.jks
