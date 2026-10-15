@@ -56,10 +56,11 @@ jobs:
           sed -i 's/-Xmx[0-9]*m/-Xmx3072m/g' android/gradle.properties 2>/dev/null || true
           if [ -n "$KEYSTORE_BASE64" ]; then
             mkdir -p ../imza
-            echo "$KEYSTORE_BASE64" | base64 -d > ../imza/kmarasbsbelediyesi.jks
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > ../imza/kmarasbsbelediyesi.jks
+            ls -l ../imza/kmarasbsbelediyesi.jks
           fi
           if [ -n "$KEYSTORE_PROPERTIES" ]; then
-            echo "$KEYSTORE_PROPERTIES" > keystore.properties
+            printf '%s\n' "$KEYSTORE_PROPERTIES" > keystore.properties
           fi
 
       - name: Android App Bundle (AAB) Derle
